@@ -1,0 +1,14 @@
+{
+  "functions": {
+    "app/api/counter/route.ts": {
+      "maxDuration": 10
+    },
+    "app/api/history/route.ts": {
+      "maxDuration": 10
+    }
+  },
+  "env": {
+    "NEXT_PUBLIC_PUSHER_KEY": "@pusher_key",
+    "NEXT_PUBLIC_PUSHER_CLUSTER": "@pusher_cluster"
+  }
+}
