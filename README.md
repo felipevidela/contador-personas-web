@@ -2,6 +2,8 @@
 
 Sistema web para visualizar en tiempo real los datos del contador de personas con Arduino.
 
+🚀 **Estado**: Listo para producción
+
 ## Características
 
 - **Tiempo Real**: Actualización automática de datos usando Pusher WebSockets
