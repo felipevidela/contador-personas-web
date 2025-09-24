@@ -35,47 +35,73 @@ export default function Home() {
     fetchCurrentData();
     fetchHistory();
 
-    // Configurar SSE para actualizaciones en tiempo real
-    const eventSource = new EventSource('/api/events');
-
-    eventSource.onopen = () => {
-      console.log('Conectado a SSE');
-      setIsConnected(true);
-    };
-
-    eventSource.onmessage = (event) => {
-      try {
-        const eventData = JSON.parse(event.data);
-
-        if (eventData.type === 'counter-update') {
-          const data = eventData.data;
-          setCurrentData(data);
-          setLastUpdate(new Date());
-          setIsConnected(true);
-
-          // Agregar al historial
-          setHistory(prev => [{...data, id: Date.now()}, ...prev].slice(0, 50));
-
-          console.log('Datos actualizados via SSE:', data);
-        }
-      } catch (error) {
-        console.error('Error procesando evento SSE:', error);
-      }
-    };
-
-    eventSource.onerror = (error) => {
-      console.error('Error en SSE:', error);
-      setIsConnected(false);
-    };
-
-    // Configurar actualización periódica como respaldo (cada 60 segundos)
+    // Configurar actualización periódica más agresiva (cada 10 segundos)
     const interval = setInterval(() => {
       fetchCurrentData();
       fetchHistory();
-    }, 60000);
+    }, 10000);
+
+    // Configurar SSE para actualizaciones en tiempo real
+    let eventSource: EventSource | null = null;
+
+    const connectSSE = () => {
+      if (eventSource) {
+        eventSource.close();
+      }
+
+      console.log('Conectando a SSE...');
+      eventSource = new EventSource('/api/events');
+
+      eventSource.onopen = () => {
+        console.log('✅ Conectado a SSE');
+        setIsConnected(true);
+      };
+
+      eventSource.onmessage = (event) => {
+        try {
+          console.log('📨 Evento SSE recibido:', event.data);
+          const eventData = JSON.parse(event.data);
+
+          if (eventData.type === 'counter-update') {
+            const data = eventData.data;
+            console.log('🔄 Actualizando datos:', data);
+
+            setCurrentData(data);
+            setLastUpdate(new Date());
+            setIsConnected(true);
+
+            // Agregar al historial
+            setHistory(prev => [{...data, id: Date.now(), created_at: data.timestamp}, ...prev].slice(0, 50));
+          } else if (eventData.type === 'connected') {
+            console.log('🎉 SSE Conectado exitosamente');
+            setIsConnected(true);
+          }
+        } catch (error) {
+          console.error('❌ Error procesando evento SSE:', error);
+        }
+      };
+
+      eventSource.onerror = (error) => {
+        console.error('❌ Error en SSE:', error);
+        setIsConnected(false);
+
+        // Intentar reconectar después de 5 segundos
+        setTimeout(() => {
+          if (eventSource?.readyState !== EventSource.OPEN) {
+            console.log('🔄 Reintentando conexión SSE...');
+            connectSSE();
+          }
+        }, 5000);
+      };
+    };
+
+    // Iniciar conexión SSE
+    connectSSE();
 
     return () => {
-      eventSource.close();
+      if (eventSource) {
+        eventSource.close();
+      }
       clearInterval(interval);
     };
   }, []);
@@ -84,31 +110,60 @@ export default function Home() {
 
   const fetchCurrentData = async () => {
     try {
-      const response = await fetch('/api/counter');
+      console.log('🔄 Obteniendo datos actuales...');
+      const response = await fetch('/api/counter', {
+        cache: 'no-cache',
+        headers: {
+          'Cache-Control': 'no-cache'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
       const data = await response.json();
+      console.log('📊 Datos recibidos:', data);
+
       if (data.current) {
         setCurrentData(data.current);
         setLastUpdate(new Date());
+        console.log('✅ Datos actuales actualizados');
       }
       if (data.history) {
         setHistory(data.history.slice(0, 50));
+        console.log('📋 Historial actualizado:', data.history.length, 'registros');
       }
       setIsLoading(false);
     } catch (error) {
-      console.error('Error obteniendo datos:', error);
+      console.error('❌ Error obteniendo datos:', error);
       setIsLoading(false);
     }
   };
 
   const fetchHistory = async () => {
     try {
-      const response = await fetch('/api/history?limit=50');
+      console.log('📋 Obteniendo historial...');
+      const response = await fetch('/api/history?limit=50', {
+        cache: 'no-cache',
+        headers: {
+          'Cache-Control': 'no-cache'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
       const data = await response.json();
-      if (data.history) {
+      console.log('📋 Historial recibido:', data);
+
+      if (data.history && Array.isArray(data.history)) {
         setHistory(data.history);
+        console.log('✅ Historial actualizado con', data.history.length, 'registros');
       }
     } catch (error) {
-      console.error('Error obteniendo historial:', error);
+      console.error('❌ Error obteniendo historial:', error);
     }
   };
 

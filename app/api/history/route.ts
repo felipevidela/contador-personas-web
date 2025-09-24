@@ -3,16 +3,23 @@ import { sql } from '@vercel/postgres';
 
 export async function GET(request: NextRequest) {
   try {
+    console.log('GET /api/history - Obteniendo historial');
+
     const searchParams = request.nextUrl.searchParams;
-    const limit = parseInt(searchParams.get('limit') || '100');
+    const limit = parseInt(searchParams.get('limit') || '50');
     const offset = parseInt(searchParams.get('offset') || '0');
     const deviceId = searchParams.get('deviceId');
     const startDate = searchParams.get('startDate');
     const endDate = searchParams.get('endDate');
 
+    console.log(`Parámetros: limit=${limit}, offset=${offset}`);
+
     if (!process.env.POSTGRES_URL) {
+      console.log('Base de datos no configurada, devolviendo historial vacío');
       return NextResponse.json({
         history: [],
+        stats: { total_records: '0' },
+        pagination: { limit, offset, total: 0 },
         message: 'Base de datos no configurada'
       });
     }
@@ -46,7 +53,22 @@ export async function GET(request: NextRequest) {
     params.push(offset);
     query += ` OFFSET $${params.length}`;
 
+    console.log('Ejecutando query:', query);
+    console.log('Parámetros:', params);
+
     const result = await sql.query(query, params);
+    console.log(`Query ejecutado, ${result.rows.length} filas obtenidas`);
+
+    // Formatear historial
+    const formattedHistory = result.rows.map(row => ({
+      id: row.id,
+      inCount: row.in_count || 0,
+      outCount: row.out_count || 0,
+      aforo: row.aforo || 0,
+      timestamp: row.timestamp || row.created_at,
+      deviceId: row.device_id || 'unknown',
+      created_at: row.created_at
+    }));
 
     // Obtener estadísticas
     const statsQuery = `
@@ -61,9 +83,10 @@ export async function GET(request: NextRequest) {
     `;
 
     const stats = await sql.query(statsQuery);
+    console.log('Estadísticas obtenidas:', stats.rows[0]);
 
     return NextResponse.json({
-      history: result.rows,
+      history: formattedHistory,
       stats: stats.rows[0],
       pagination: {
         limit,

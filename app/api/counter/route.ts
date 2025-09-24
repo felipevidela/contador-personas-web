@@ -135,46 +135,94 @@ export async function POST(request: NextRequest) {
 
 export async function GET() {
   try {
+    console.log('GET /api/counter - Obteniendo datos actuales');
+
     // Si hay base de datos, obtener últimos registros
     if (process.env.POSTGRES_URL) {
       try {
-        const result = await sql`
-          SELECT * FROM counter_logs
-          ORDER BY created_at DESC
-          LIMIT 100
+        console.log('Consultando base de datos PostgreSQL');
+
+        // Crear tabla si no existe
+        await sql`
+          CREATE TABLE IF NOT EXISTS counter_logs (
+            id SERIAL PRIMARY KEY,
+            in_count INTEGER NOT NULL DEFAULT 0,
+            out_count INTEGER NOT NULL DEFAULT 0,
+            aforo INTEGER NOT NULL DEFAULT 0,
+            device_id VARCHAR(255) DEFAULT 'unknown',
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          )
         `;
+
+        const result = await sql`
+          SELECT
+            id,
+            in_count,
+            out_count,
+            aforo,
+            device_id,
+            timestamp,
+            created_at
+          FROM counter_logs
+          ORDER BY created_at DESC
+          LIMIT 10
+        `;
+
+        console.log(`Encontrados ${result.rows.length} registros en BD`);
 
         // Obtener el último registro
         const latestRecord = result.rows[0];
         if (latestRecord) {
           lastState = {
-            inCount: latestRecord.in_count,
-            outCount: latestRecord.out_count,
-            aforo: latestRecord.aforo,
-            timestamp: latestRecord.timestamp,
-            deviceId: latestRecord.device_id
+            inCount: latestRecord.in_count || 0,
+            outCount: latestRecord.out_count || 0,
+            aforo: latestRecord.aforo || 0,
+            timestamp: latestRecord.timestamp || new Date().toISOString(),
+            deviceId: latestRecord.device_id || 'unknown'
           };
+          console.log('Estado actualizado desde BD:', lastState);
         }
+
+        // Formatear historial para frontend
+        const formattedHistory = result.rows.map(row => ({
+          id: row.id,
+          inCount: row.in_count || 0,
+          outCount: row.out_count || 0,
+          aforo: row.aforo || 0,
+          timestamp: row.timestamp || row.created_at,
+          deviceId: row.device_id || 'unknown',
+          created_at: row.created_at
+        }));
 
         return NextResponse.json({
           current: lastState,
-          history: result.rows
+          history: formattedHistory,
+          source: 'database'
         });
+
       } catch (dbError) {
         console.error('Error de base de datos:', dbError);
+        // Continuar con estado en memoria
       }
     }
 
-    // Devolver estado en memoria si no hay DB
+    // Devolver estado en memoria si no hay DB o si hay error
+    console.log('Usando estado en memoria:', lastState);
     return NextResponse.json({
       current: lastState,
-      history: []
+      history: [],
+      source: 'memory'
     });
 
   } catch (error) {
     console.error('Error obteniendo datos:', error);
     return NextResponse.json(
-      { error: 'Error interno del servidor' },
+      {
+        error: 'Error interno del servidor',
+        current: lastState,
+        history: []
+      },
       { status: 500 }
     );
   }
