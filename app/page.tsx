@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
+import Pusher from 'pusher-js';
 
 interface CounterData {
   inCount: number;
@@ -35,78 +36,68 @@ export default function Home() {
     fetchCurrentData();
     fetchHistory();
 
-    // Configurar actualización periódica más agresiva (cada 10 segundos)
+    // Configurar polling como respaldo (cada 30 segundos)
     const interval = setInterval(() => {
       fetchCurrentData();
       fetchHistory();
-    }, 10000);
+    }, 30000);
 
-    // Configurar SSE para actualizaciones en tiempo real
-    let eventSource: EventSource | null = null;
+    // Configurar Pusher para tiempo real
+    let pusher: Pusher | null = null;
 
-    const connectSSE = () => {
-      if (eventSource) {
-        eventSource.close();
+    const connectPusher = () => {
+      if (!process.env.NEXT_PUBLIC_PUSHER_KEY) {
+        console.log('⚠️ Pusher no configurado, usando solo polling');
+        setIsConnected(false);
+        return;
       }
 
-      console.log('Conectando a SSE...');
-      eventSource = new EventSource('/api/events');
+      console.log('🚀 Conectando a Pusher...');
+      pusher = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY, {
+        cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER || 'us2',
+      });
 
-      eventSource.onopen = () => {
-        console.log('✅ Conectado a SSE');
+      const channel = pusher.subscribe('counter-channel');
+
+      channel.bind('counter-update', (data: CounterData) => {
+        console.log('📨 Evento Pusher recibido:', data);
+        setCurrentData(data);
+        setLastUpdate(new Date());
         setIsConnected(true);
-      };
 
-      eventSource.onmessage = (event) => {
-        try {
-          console.log('📨 Evento SSE recibido:', event.data);
-          const eventData = JSON.parse(event.data);
+        // Agregar al historial
+        setHistory(prev => [{...data, id: Date.now(), created_at: data.timestamp}, ...prev].slice(0, 50));
+      });
 
-          if (eventData.type === 'counter-update') {
-            const data = eventData.data;
-            console.log('🔄 Actualizando datos:', data);
+      pusher.connection.bind('connected', () => {
+        setIsConnected(true);
+        console.log('✅ Conectado a Pusher');
+      });
 
-            setCurrentData(data);
-            setLastUpdate(new Date());
-            setIsConnected(true);
-
-            // Agregar al historial
-            setHistory(prev => [{...data, id: Date.now(), created_at: data.timestamp}, ...prev].slice(0, 50));
-          } else if (eventData.type === 'connected') {
-            console.log('🎉 SSE Conectado exitosamente');
-            setIsConnected(true);
-          }
-        } catch (error) {
-          console.error('❌ Error procesando evento SSE:', error);
-        }
-      };
-
-      eventSource.onerror = (error) => {
-        console.error('❌ Error en SSE:', error);
+      pusher.connection.bind('disconnected', () => {
         setIsConnected(false);
+        console.log('❌ Desconectado de Pusher');
+      });
 
-        // Intentar reconectar después de 5 segundos
-        setTimeout(() => {
-          if (eventSource?.readyState !== EventSource.OPEN) {
-            console.log('🔄 Reintentando conexión SSE...');
-            connectSSE();
-          }
-        }, 5000);
-      };
+      pusher.connection.bind('error', (error: unknown) => {
+        setIsConnected(false);
+        console.error('❌ Error de Pusher:', error);
+      });
     };
 
-    // Iniciar conexión SSE
-    connectSSE();
+    // Iniciar conexión Pusher
+    connectPusher();
 
     return () => {
-      if (eventSource) {
-        eventSource.close();
+      if (pusher) {
+        pusher.unsubscribe('counter-channel');
+        pusher.disconnect();
       }
       clearInterval(interval);
     };
   }, []);
 
-  // Nota: Pusher reemplazado por SSE para actualizaciones en tiempo real
+  // Nota: SSE reemplazado por Pusher - funciona correctamente en Vercel serverless
 
   const fetchCurrentData = async () => {
     try {

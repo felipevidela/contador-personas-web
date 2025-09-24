@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 import Pusher from 'pusher';
-import { broadcastEvent } from '../../../lib/sse';
 
 // Inicializar Pusher solo si las credenciales están configuradas
 const pusher = process.env.PUSHER_APP_ID ? new Pusher({
@@ -11,6 +10,14 @@ const pusher = process.env.PUSHER_APP_ID ? new Pusher({
   cluster: process.env.PUSHER_CLUSTER!,
   useTLS: true
 }) : null;
+
+// Log del estado de Pusher al inicializar
+if (pusher) {
+  console.log('✅ Pusher configurado correctamente');
+} else {
+  console.log('⚠️ Pusher NO configurado - faltan variables de entorno');
+  console.log('Variables requeridas: PUSHER_APP_ID, PUSHER_KEY, PUSHER_SECRET, PUSHER_CLUSTER');
+}
 
 // Almacenar último estado en memoria (para desarrollo sin DB)
 let lastState = {
@@ -86,6 +93,7 @@ export async function POST(request: NextRequest) {
     // Enviar actualización en tiempo real vía Pusher
     if (pusher) {
       try {
+        console.log('📡 Enviando evento Pusher...');
         await pusher.trigger('counter-channel', 'counter-update', {
           inCount,
           outCount,
@@ -93,26 +101,15 @@ export async function POST(request: NextRequest) {
           timestamp: finalTimestamp,
           deviceId
         });
+        console.log('✅ Evento Pusher enviado correctamente');
       } catch (pusherError) {
-        console.error('Error de Pusher (no crítico):', pusherError);
+        console.error('❌ Error de Pusher:', pusherError);
       }
+    } else {
+      console.log('⚠️ Pusher no configurado - variables de entorno faltantes');
     }
 
-    // Enviar evento SSE a todas las conexiones
-    try {
-      broadcastEvent({
-        type: 'counter-update',
-        data: {
-          inCount,
-          outCount,
-          aforo,
-          timestamp: finalTimestamp,
-          deviceId
-        }
-      });
-    } catch (sseError) {
-      console.error('Error de SSE (no crítico):', sseError);
-    }
+    // SSE removido - no funciona en Vercel serverless
 
     return NextResponse.json({
       success: true,
