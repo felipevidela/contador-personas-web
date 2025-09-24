@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@vercel/postgres';
 import Pusher from 'pusher';
+import { broadcastEvent } from '../../../lib/sse';
 
 // Inicializar Pusher solo si las credenciales están configuradas
 const pusher = process.env.PUSHER_APP_ID ? new Pusher({
@@ -95,6 +96,22 @@ export async function POST(request: NextRequest) {
       } catch (pusherError) {
         console.error('Error de Pusher (no crítico):', pusherError);
       }
+    }
+
+    // Enviar evento SSE a todas las conexiones
+    try {
+      broadcastEvent({
+        type: 'counter-update',
+        data: {
+          inCount,
+          outCount,
+          aforo,
+          timestamp: finalTimestamp,
+          deviceId
+        }
+      });
+    } catch (sseError) {
+      console.error('Error de SSE (no crítico):', sseError);
     }
 
     return NextResponse.json({

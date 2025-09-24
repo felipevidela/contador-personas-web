@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
-import Pusher from 'pusher-js';
 
 interface CounterData {
   inCount: number;
@@ -36,52 +35,52 @@ export default function Home() {
     fetchCurrentData();
     fetchHistory();
 
-    // Configurar actualización periódica cada 30 segundos
+    // Configurar SSE para actualizaciones en tiempo real
+    const eventSource = new EventSource('/api/events');
+
+    eventSource.onopen = () => {
+      console.log('Conectado a SSE');
+      setIsConnected(true);
+    };
+
+    eventSource.onmessage = (event) => {
+      try {
+        const eventData = JSON.parse(event.data);
+
+        if (eventData.type === 'counter-update') {
+          const data = eventData.data;
+          setCurrentData(data);
+          setLastUpdate(new Date());
+          setIsConnected(true);
+
+          // Agregar al historial
+          setHistory(prev => [{...data, id: Date.now()}, ...prev].slice(0, 50));
+
+          console.log('Datos actualizados via SSE:', data);
+        }
+      } catch (error) {
+        console.error('Error procesando evento SSE:', error);
+      }
+    };
+
+    eventSource.onerror = (error) => {
+      console.error('Error en SSE:', error);
+      setIsConnected(false);
+    };
+
+    // Configurar actualización periódica como respaldo (cada 60 segundos)
     const interval = setInterval(() => {
       fetchCurrentData();
       fetchHistory();
-    }, 30000);
-
-    return () => clearInterval(interval);
-  }, []);
-
-  // Configurar Pusher para tiempo real
-  useEffect(() => {
-    if (!process.env.NEXT_PUBLIC_PUSHER_KEY) {
-      console.log('Pusher no configurado, usando polling');
-      return;
-    }
-
-    const pusher = new Pusher(process.env.NEXT_PUBLIC_PUSHER_KEY, {
-      cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER || 'us2',
-    });
-
-    const channel = pusher.subscribe('counter-channel');
-
-    channel.bind('counter-update', (data: CounterData) => {
-      setCurrentData(data);
-      setLastUpdate(new Date());
-      setIsConnected(true);
-      // Agregar al historial
-      setHistory(prev => [{...data, id: Date.now()}, ...prev].slice(0, 50));
-    });
-
-    pusher.connection.bind('connected', () => {
-      setIsConnected(true);
-      console.log('Conectado a Pusher');
-    });
-
-    pusher.connection.bind('disconnected', () => {
-      setIsConnected(false);
-      console.log('Desconectado de Pusher');
-    });
+    }, 60000);
 
     return () => {
-      channel.unbind_all();
-      channel.unsubscribe();
-      pusher.disconnect();
+      eventSource.close();
+      clearInterval(interval);
     };
   }, []);
+
+  // Nota: Pusher reemplazado por SSE para actualizaciones en tiempo real
 
   const fetchCurrentData = async () => {
     try {
@@ -156,7 +155,7 @@ export default function Home() {
               <div className={`flex items-center ${isConnected ? 'text-green-600' : 'text-red-600'}`}>
                 <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-600' : 'bg-red-600'} mr-2 animate-pulse`}></div>
                 <span className="text-sm font-medium">
-                  {isConnected ? 'Conectado' : 'Desconectado'}
+                  {isConnected ? 'Tiempo Real' : 'Desconectado'}
                 </span>
               </div>
               <div className="text-sm text-gray-500">
