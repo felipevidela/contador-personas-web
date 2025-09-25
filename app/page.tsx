@@ -1,5 +1,6 @@
 'use client';
 
+// Sistema de tabs integrado v2.0
 import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
