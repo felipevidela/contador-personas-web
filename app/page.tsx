@@ -391,7 +391,7 @@ export default function Home() {
               <div className="flex items-center space-x-2">
                 <select
                   value={filterType}
-                  onChange={(e) => setFilterType(e.target.value as any)}
+                  onChange={(e) => setFilterType(e.target.value as 'all' | 'entrada' | 'salida')}
                   className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
                 >
                   <option value="all">Todos</option>
