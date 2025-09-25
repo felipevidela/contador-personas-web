@@ -200,9 +200,6 @@ export default function Home() {
             <div className="flex items-center space-x-4">
               <div className={`flex items-center ${isConnected ? 'text-green-600' : 'text-red-600'}`}>
                 <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-600' : 'bg-red-600'} mr-2 animate-pulse`}></div>
-                <span className="text-sm font-medium">
-                  {isConnected ? 'Tiempo Real' : 'Desconectado'}
-                </span>
               </div>
               <div className="text-sm text-gray-500">
                 {formatRelativeTime(lastUpdate)}
