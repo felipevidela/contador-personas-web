@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
-import Link from 'next/link';
 import Pusher from 'pusher-js';
 
 interface CounterData {
@@ -28,9 +27,14 @@ export default function Home() {
   });
 
   const [history, setHistory] = useState<HistoryRecord[]>([]);
+  const [allLogs, setAllLogs] = useState<HistoryRecord[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const [isLoading, setIsLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'resumen' | 'logs'>('resumen');
+  const [filterType, setFilterType] = useState<'all' | 'entrada' | 'salida'>('all');
+  const [dateFilter, setDateFilter] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Cargar datos iniciales
   useEffect(() => {
@@ -136,23 +140,31 @@ export default function Home() {
   const fetchHistory = async () => {
     try {
       console.log('📋 Obteniendo historial...');
-      const response = await fetch('/api/history?limit=50', {
+      // Obtener resumen (50 registros)
+      const responseResumen = await fetch('/api/history?limit=50', {
         cache: 'no-cache',
-        headers: {
-          'Cache-Control': 'no-cache'
-        }
+        headers: { 'Cache-Control': 'no-cache' }
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+      if (responseResumen.ok) {
+        const dataResumen = await responseResumen.json();
+        if (dataResumen.history && Array.isArray(dataResumen.history)) {
+          setHistory(dataResumen.history);
+        }
       }
 
-      const data = await response.json();
-      console.log('📋 Historial recibido:', data);
+      // Obtener todos los logs (1000 registros)
+      const responseAll = await fetch('/api/history?limit=1000', {
+        cache: 'no-cache',
+        headers: { 'Cache-Control': 'no-cache' }
+      });
 
-      if (data.history && Array.isArray(data.history)) {
-        setHistory(data.history);
-        console.log('✅ Historial actualizado con', data.history.length, 'registros');
+      if (responseAll.ok) {
+        const dataAll = await responseAll.json();
+        if (dataAll.history && Array.isArray(dataAll.history)) {
+          setAllLogs(dataAll.history);
+          console.log('✅ Logs completos actualizados con', dataAll.history.length, 'registros');
+        }
       }
     } catch (error) {
       console.error('❌ Error obteniendo historial:', error);
@@ -178,6 +190,69 @@ export default function Home() {
     return `Hace ${days} días`;
   };
 
+  const getEventType = (log: HistoryRecord, index: number, logs: HistoryRecord[]) => {
+    const prevLog = logs[index + 1];
+    if (!prevLog) return null;
+
+    const entryChange = log.inCount - prevLog.inCount;
+    const exitChange = log.outCount - prevLog.outCount;
+
+    if (entryChange > 0) return { type: 'entrada', change: entryChange };
+    if (exitChange > 0) return { type: 'salida', change: exitChange };
+    return null;
+  };
+
+  const getFilteredLogs = () => {
+    let filtered = [...allLogs];
+
+    // Filtrar por tipo
+    if (filterType !== 'all') {
+      filtered = filtered.filter((log, index) => {
+        const event = getEventType(log, index, allLogs);
+        if (!event) return false;
+        return filterType === event.type;
+      });
+    }
+
+    // Filtrar por fecha
+    if (dateFilter) {
+      const filterDate = new Date(dateFilter);
+      filtered = filtered.filter(log => {
+        const logDate = new Date(log.timestamp);
+        return logDate.toDateString() === filterDate.toDateString();
+      });
+    }
+
+    return filtered;
+  };
+
+  const exportToCSV = () => {
+    const filtered = getFilteredLogs();
+    const csvContent = [
+      ['Fecha y Hora', 'Tipo', 'Entradas Totales', 'Salidas Totales', 'Aforo', 'Cambio', 'Dispositivo'],
+      ...filtered.map((log, index) => {
+        const event = getEventType(log, index, filtered);
+        return [
+          formatTimestamp(log.timestamp),
+          event?.type || 'N/A',
+          log.inCount,
+          log.outCount,
+          log.aforo,
+          event?.change || 0,
+          log.deviceId || 'N/A'
+        ];
+      })
+    ].map(row => row.join(',')).join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `logs-contador-personas-${format(new Date(), 'yyyy-MM-dd')}.csv`;
+    a.click();
+    window.URL.revokeObjectURL(url);
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -199,12 +274,6 @@ export default function Home() {
               Sistema Contador de Personas
             </h1>
             <div className="flex items-center space-x-4">
-              <Link
-                href="/logs"
-                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors text-sm font-medium"
-              >
-                Ver Logs
-              </Link>
               <div className={`flex items-center ${isConnected ? 'text-green-600' : 'text-red-600'}`}>
                 <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-600' : 'bg-red-600'} mr-2 animate-pulse`}></div>
               </div>
@@ -290,88 +359,275 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Historial */}
+        {/* Historial con Tabs */}
         <div className="bg-white rounded-lg shadow-lg p-6">
-          <h2 className="text-xl font-semibold text-gray-800 mb-4">
-            Historial de Registros
-          </h2>
+          {/* Tabs Header */}
+          <div className="flex justify-between items-center mb-6">
+            <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg">
+              <button
+                onClick={() => setActiveTab('resumen')}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                  activeTab === 'resumen'
+                    ? 'bg-white text-blue-600 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                Resumen
+              </button>
+              <button
+                onClick={() => setActiveTab('logs')}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                  activeTab === 'logs'
+                    ? 'bg-white text-blue-600 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                Logs Completos
+              </button>
+            </div>
 
-          {history.length === 0 ? (
-            <div className="text-center py-8 text-gray-500">
-              No hay registros disponibles
+            {activeTab === 'logs' && (
+              <div className="flex items-center space-x-2">
+                <select
+                  value={filterType}
+                  onChange={(e) => setFilterType(e.target.value as any)}
+                  className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
+                >
+                  <option value="all">Todos</option>
+                  <option value="entrada">Entradas</option>
+                  <option value="salida">Salidas</option>
+                </select>
+
+                <input
+                  type="date"
+                  value={dateFilter}
+                  onChange={(e) => setDateFilter(e.target.value)}
+                  className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                />
+
+                <button
+                  onClick={() => {
+                    setFilterType('all');
+                    setDateFilter('');
+                  }}
+                  className="bg-gray-500 hover:bg-gray-600 text-white px-3 py-2 rounded-lg text-sm transition-colors"
+                >
+                  Limpiar
+                </button>
+
+                <button
+                  onClick={exportToCSV}
+                  className="bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg text-sm transition-colors"
+                >
+                  CSV
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Tab Content */}
+          {activeTab === 'resumen' ? (
+            // Tab Resumen - Vista actual simplificada
+            <div>
+              <h3 className="text-lg font-semibold text-gray-800 mb-4">Últimos 50 Registros</h3>
+              {history.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  No hay registros disponibles
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Fecha y Hora
+                        </th>
+                        <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Entradas
+                        </th>
+                        <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Salidas
+                        </th>
+                        <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Aforo
+                        </th>
+                        <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Cambio
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {history.map((record, index) => {
+                        const prevRecord = history[index + 1];
+                        const changeIn = prevRecord ? record.inCount - prevRecord.inCount : 0;
+                        const changeOut = prevRecord ? record.outCount - prevRecord.outCount : 0;
+
+                        return (
+                          <tr key={record.id || index} className="hover:bg-gray-50">
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                              {formatTimestamp(record.timestamp)}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-center">
+                              <span className="text-gray-900">{record.inCount}</span>
+                              {changeIn > 0 && (
+                                <span className="ml-2 text-green-600 text-xs">
+                                  +{changeIn}
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-center">
+                              <span className="text-gray-900">{record.outCount}</span>
+                              {changeOut > 0 && (
+                                <span className="ml-2 text-red-600 text-xs">
+                                  +{changeOut}
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-center font-medium">
+                              <span className={`${record.aforo > 0 ? 'text-blue-600' : 'text-gray-400'}`}>
+                                {Math.max(0, record.aforo)}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-center">
+                              {changeIn > 0 && (
+                                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                  Entrada
+                                </span>
+                              )}
+                              {changeOut > 0 && (
+                                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                  Salida
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Fecha y Hora
-                    </th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Entradas
-                    </th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Salidas
-                    </th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Aforo
-                    </th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Cambio
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {history.map((record, index) => {
-                    const prevRecord = history[index + 1];
-                    const changeIn = prevRecord ? record.inCount - prevRecord.inCount : 0;
-                    const changeOut = prevRecord ? record.outCount - prevRecord.outCount : 0;
+            // Tab Logs Completos - Vista extendida con filtros
+            (() => {
+              const filteredLogs = getFilteredLogs();
+              const LOGS_PER_PAGE = 100;
+              const paginatedLogs = filteredLogs.slice(
+                (currentPage - 1) * LOGS_PER_PAGE,
+                currentPage * LOGS_PER_PAGE
+              );
+              const totalPages = Math.ceil(filteredLogs.length / LOGS_PER_PAGE);
 
-                    return (
-                      <tr key={record.id || index} className="hover:bg-gray-50">
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {formatTimestamp(record.timestamp)}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-center">
-                          <span className="text-gray-900">{record.inCount}</span>
-                          {changeIn > 0 && (
-                            <span className="ml-2 text-green-600 text-xs">
-                              +{changeIn}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-center">
-                          <span className="text-gray-900">{record.outCount}</span>
-                          {changeOut > 0 && (
-                            <span className="ml-2 text-red-600 text-xs">
-                              +{changeOut}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-center font-medium">
-                          <span className={`${record.aforo > 0 ? 'text-blue-600' : 'text-gray-400'}`}>
-                            {Math.max(0, record.aforo)}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-center">
-                          {changeIn > 0 && (
-                            <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                              Entrada
-                            </span>
-                          )}
-                          {changeOut > 0 && (
-                            <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                              Salida
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+              return (
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-800 mb-4">
+                    Logs Completos - {filteredLogs.length} registros
+                  </h3>
+
+                  {paginatedLogs.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500">
+                      No hay logs con los filtros aplicados
+                    </div>
+                  ) : (
+                    <>
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Fecha y Hora
+                              </th>
+                              <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Tipo
+                              </th>
+                              <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Entradas
+                              </th>
+                              <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Salidas
+                              </th>
+                              <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Aforo
+                              </th>
+                              <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Dispositivo
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="bg-white divide-y divide-gray-200">
+                            {paginatedLogs.map((log, index) => {
+                              const event = getEventType(log, filteredLogs.indexOf(log), filteredLogs);
+
+                              return (
+                                <tr key={log.id || index} className="hover:bg-gray-50">
+                                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                    {formatTimestamp(log.timestamp)}
+                                  </td>
+                                  <td className="px-6 py-4 whitespace-nowrap text-center">
+                                    {event ? (
+                                      <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
+                                        event.type === 'entrada'
+                                          ? 'bg-green-100 text-green-800'
+                                          : 'bg-red-100 text-red-800'
+                                      }`}>
+                                        {event.type === 'entrada' ? '↗️ Entrada' : '↙️ Salida'}
+                                        {event.change > 1 && ` (+${event.change})`}
+                                      </span>
+                                    ) : (
+                                      <span className="text-gray-400">-</span>
+                                    )}
+                                  </td>
+                                  <td className="px-6 py-4 whitespace-nowrap text-sm text-center font-medium text-gray-900">
+                                    {log.inCount}
+                                  </td>
+                                  <td className="px-6 py-4 whitespace-nowrap text-sm text-center font-medium text-gray-900">
+                                    {log.outCount}
+                                  </td>
+                                  <td className="px-6 py-4 whitespace-nowrap text-sm text-center font-medium">
+                                    <span className={`${log.aforo > 0 ? 'text-blue-600' : 'text-gray-400'}`}>
+                                      {Math.max(0, log.aforo)}
+                                    </span>
+                                  </td>
+                                  <td className="px-6 py-4 whitespace-nowrap text-sm text-center text-gray-500">
+                                    {log.deviceId || 'N/A'}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* Paginación */}
+                      {totalPages > 1 && (
+                        <div className="mt-6 flex items-center justify-between">
+                          <div className="text-sm text-gray-700">
+                            Página {currentPage} de {totalPages}
+                          </div>
+                          <div className="flex space-x-2">
+                            <button
+                              onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                              disabled={currentPage === 1}
+                              className="px-3 py-2 border border-gray-300 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                            >
+                              Anterior
+                            </button>
+                            <button
+                              onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                              disabled={currentPage === totalPages}
+                              className="px-3 py-2 border border-gray-300 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                            >
+                              Siguiente
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })()
           )}
         </div>
       </div>
