@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
+import Link from 'next/link';
 import Pusher from 'pusher-js';
 
 interface CounterData {
@@ -198,6 +199,12 @@ export default function Home() {
               Sistema Contador de Personas
             </h1>
             <div className="flex items-center space-x-4">
+              <Link
+                href="/logs"
+                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors text-sm font-medium"
+              >
+                Ver Logs
+              </Link>
               <div className={`flex items-center ${isConnected ? 'text-green-600' : 'text-red-600'}`}>
                 <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-600' : 'bg-red-600'} mr-2 animate-pulse`}></div>
               </div>
